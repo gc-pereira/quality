@@ -1,11 +1,19 @@
 #!/usr/bin/env python
 # coding: utf-8
+import time
 import json
 import boto3
+import botocore
 import traceback
 import urllib.parse
+import pandas as pd
 import logging as log
+import awswrangler as wr
+import great_expectations as ge
+
+
 from aws.utils import main as utils
+from pyarrow.lib import ArrowInvalid
 
 s3 = boto3.client('s3')
 
@@ -46,6 +54,7 @@ def get_keydict(bucket_name: str, key: str) -> dict:
     json_content = response['Body'].read().decode('utf-8')
     json_data = json.loads(json_content)
     return json_data
+
 
 def idempotence(event_id):
     dynamodb = boto3.resource('dynamodb')
@@ -98,8 +107,26 @@ def load_data(src):
     return dfs
     
 
-def quality():
+def quality(src, df, df_idx) -> tuple[pd.DataFrame, dict]:
+    df = ge.from_pandas(df)
+    result = {
+        'chunks': df_idx,
+        'row_count': len(df),
+        'count_success': True,
+        'count_result': -1,
+        'process_file': 'None',
+        'process_success': True,
+        'process_result': 'None',
+        'suite_file': 'None',
+        'suite_success': True,
+        'suite_result': 'None',
+        'commit_id': 'None',
+        'success': True,
+    }
     
+    # TODO: write quality process
+    
+    return df, result
 
 
 def handler(event, context):
@@ -107,6 +134,8 @@ def handler(event, context):
         if any(utils.in_lambda(), utils.in_glue()):
             src = source(event)
             if idempotence(src['s3_uri']):
-                src = {**src, **quality(src)}
+                df, result = quality(src)
+                src = {**src, **result}
     else:
         return False
+    
