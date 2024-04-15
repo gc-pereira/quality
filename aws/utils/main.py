@@ -62,13 +62,15 @@ def get_env():
     Returns:
         str: returns string 'prd' for production or 'dev' to development environments.
     """
-    try:
-        return wr.sts.get_current_identity_arn().split('ht8-')[1].split('-')[0]
-    except IndexError:
-        return 'prd'
-    except Exception as e:
-        print('get_env() '+str(e))
-        return 'prd'
+    # TODO: USE THIS CODE OR WRITE NEW
+    # try:
+    #     return wr.sts.get_current_identity_arn().split('gcarr-')[1].split('-')[0]
+    # except IndexError:
+    #     return 'prd'
+    # except Exception as e:
+    #     print('get_env() '+str(e))
+    #     return 'prd'
+    return 'dev'
 
 
 def get_account_id():
