@@ -84,16 +84,11 @@ def export_s3(file: str):
     return s3_path
     
     
-def dtypes_from_sql_types():
+def dtypes_from_sql_types(df):
     dtypes = {}
     null_cols = []
     # read sql types from | csv
-    sql_types = sql_types = pd.read_csv(
-        'aws/s3/quality/' + '/'.join([src['database'], src['owner'], src['table']+'.def.csv']).lower(),
-        sep='|',
-        encoding='utf-8',
-        keep_default_na=False
-    ).to_dict(orient='index')
+    sql_types = df.to_dict(orient='index')
     col_num = {sql_types[num]['name'] : num for num in sql_types}
     col_list = sorted([col for col in col_num])
     # transform types
@@ -153,6 +148,6 @@ if __name__ == '__main__':
         def_path = f'{os.getcwd()}/aws/s3/{prefix}/{table}.def.csv'
         df.to_csv(def_path, sep="|", index=False)
         export_s3(def_path)
-        dtypes_from_sql_types(df, def_path)
+        dtypes_from_sql_types(df)
     
     
