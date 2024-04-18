@@ -19,6 +19,7 @@ import great_expectations as ge
 
 from aws.utils.main import get_env
 
+
 context = 'mysql'
 table = 'churn'
 system = 'sales'
@@ -26,6 +27,8 @@ db = 'customers' # Database name
 
 bucket = f'gcarr-{get_env()}-artifacts'
 prefix = f'quality/{system}/{db}/{table}/'
+
+src = {}
 
 
 def get_definition(context: str, table: str):
@@ -79,53 +82,66 @@ def export_s3(file: str):
     wr.s3.upload(local_file=file, 
                  path=s3_path)
     return s3_path
-
-
-def load_data(def_path: str):
-    if def_path == 'csv':
-        try:
-            df = wr.s3.read_csv(
-                def_path,
-                encoding='utf-8',
-                sep='|',
-                keep_default_na=False,
-                use_threads=True
-            )
-            
-            if len(list(df.columns)) <= 1:
-                print("Only one column found for csv, perfoming fallback read with sep=;")
-                df = wr.s3.read_csv(
-                    src['s3_uri'],
-                    encoding='utf-8',
-                    sep=';',
-                    keep_default_na=False,
-                    use_threads=True                
-                )
-                
-        except pd.errors.ParserError as e:
-                print("Parser Error, trying with ; separator.")
-                df = wr.s3.read_csv(
-                    src['s3_uri'],
-                    encoding='utf-8',
-                    sep=';',
-                    keep_default_na=False,
-                    use_threads=True                
-                )
-    elif src['ext'] == 'parquet':
-        try:
-            df = wr.s3.read_parquet(
-                src['s3_uri'],
-                use_threads=True
-            )
-        except ArrowInvalid as e:
-            print(str(e))
-            print("fallback read with safe cast = False")
-            df = wr.s3.read_parquet(
-                src['s3_uri'],
-                use_threads=True,
-                safe=False
-            )
-    return ge.from_pandas(df)
+    
+    
+def dtypes_from_sql_types():
+    dtypes = {}
+    null_cols = []
+    # read sql types from | csv
+    sql_types = sql_types = pd.read_csv(
+        'aws/s3/quality/' + '/'.join([src['database'], src['owner'], src['table']+'.def.csv']).lower(),
+        sep='|',
+        encoding='utf-8',
+        keep_default_na=False
+    ).to_dict(orient='index')
+    col_num = {sql_types[num]['name'] : num for num in sql_types}
+    col_list = sorted([col for col in col_num])
+    # transform types
+    for col in col_list:
+        # column dtype conversion
+        column = sql_types[col_num[col]]
+        message = ''
+        if column['type'].upper().startswith('INTEGER'):
+            dtypes[column['name']] = "int64"
+        elif column['type'].upper().startswith('LONG'):
+            dtypes[column['name']] = "object"
+        elif column['type'].upper().startswith('NUMBER'):
+            nums = re.findall('\d+', column['type'].upper())
+            if len(nums) == 0:
+                dtypes[column['name']] = 'float64'
+            elif len(nums) == 1:
+                if int(nums[0]) < 3:
+                    dtypes[column['name']] = "int8"
+                elif int(nums[0]) < 5:
+                    dtypes[column['name']] = "int16"
+                elif int(nums[0]) < 10:
+                    dtypes[column['name']] = "int32"
+                else:
+                    dtypes[column['name']] = "int64"
+            else:
+                dtypes[column['name']] = "float64"
+        elif column['type'].upper().startswith('VARCHAR') or \
+             column['type'].upper().startswith('NVARCHAR') or \
+             column['type'].upper().startswith('CHAR') or \
+             column['type'].upper().startswith('DATE') or \
+             column['type'].upper().startswith('TIME') or \
+             column['type'].upper().startswith('STRING'):
+            dtypes[column['name']] = "object"
+        elif column['type'].upper().startswith('BLOB') or \
+             column['type'].upper().startswith('CLOB'):
+            print('WARN !-> '+str(column)+' requires processing')
+            dtypes[column['name']] = "object"
+        else:
+            print('FAIL !-> '+str(column))
+            break
+        # columns dtype null check
+        if dtypes[column['name']].startswith("int") and column['null'].upper() == 'Y':
+            dtypes[column['name']] = dtypes[column['name']].capitalize()
+        # info print
+        print(f"{column['name']:35} ({column['null'].upper():1}) {column['type'].upper():20} ->   {dtypes[column['name']]:7}   "+message)
+        if column['null'].upper() == 'Y':
+            null_cols.append(column['name'])
+    return dtypes, null_cols
 
 
 if __name__ == '__main__':
@@ -137,5 +153,6 @@ if __name__ == '__main__':
         def_path = f'{os.getcwd()}/aws/s3/{prefix}/{table}.def.csv'
         df.to_csv(def_path, sep="|", index=False)
         export_s3(def_path)
+        dtypes_from_sql_types(df, def_path)
     
     
